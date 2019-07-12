@@ -12,7 +12,6 @@ from utils.config import get_config
 _CONFIG = get_config()
 
 
-@unittest.skip('x')
 class TestIndexRunner(unittest.TestCase):
 
     @classmethod
@@ -34,10 +33,11 @@ class TestIndexRunner(unittest.TestCase):
         })
         print('Trying to receive from sock..')
         rep = self.sock.recv_json()
-        self.assertEqual(rep['_action'], 'index')
-        self.assertEqual(rep['doc']['narrative_title'], 'Test Narrative Name')
-        self.assertEqual(rep['index'], 'narrative:1')
-        self.assertEqual(rep['id'], 'WS::41347:5')
+        self.assertEqual(rep['_action'], 'index_file')
+        print('PATH!', rep['path'])
+        self.assertTrue(rep['path'])
+        with open(rep['path'], 'r') as fd:
+            print('CONTENTS!', fd.read())
 
 
 # -- Utils

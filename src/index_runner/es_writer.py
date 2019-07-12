@@ -38,7 +38,6 @@ class ESWriter:
         context = zmq.Context.instance()
         self.sock = context.socket(zmq.PULL)  # Socket for sending replies to index_runner
         self.sock.connect(self.sock_url)
-        self.sock.RCVTIMEO = 5000  # timeout on receiving messages in 5s
         print("Initializing all ES indices and mappings from the global config:")
         for index, mapping in _MAPPINGS.items():
             global_mappings = {}  # type: dict
@@ -57,14 +56,8 @@ class ESWriter:
         """Run the event loop, receiving messages over self.sock."""
         # Main event loop
         while True:
-            try:
-                msg = self.sock.recv_json()
-                self._handle_message(msg)
-            except zmq.error.Again:
-                # Timeout; no messages
-                print('No more messages, performing batch ops..')
-                self._perform_batch_ops()
-                time.sleep(5)
+            msg = self.sock.recv_json()
+            self._handle_message(msg)
 
     def _handle_message(self, msg):
         """
@@ -75,43 +68,43 @@ class ESWriter:
             print(f"Message to elasticsearch writer missing `_action` field: {msg}")
             return
         action = msg['_action']
-        if action == 'delete':
-            self.batch_deletes.append(msg)
-        elif action == 'index_file':
+        # if action == 'delete':
+        #     self.batch_deletes.append(msg)
+        if action == 'index_file':
             self._index_file(msg)
-        elif action == 'index':
-            self.batch_writes.append(msg)
+        # elif action == 'index':
+        #     self.batch_writes.append(msg)
         elif action == 'init_index':
             self._init_index(msg)
         elif action == 'init_generic_index':
             self._init_generic_index(msg)
         elif action == 'set_global_perm':
             self._set_global_perm(msg)
-        self._perform_batch_ops(min_length=10000)
 
     def _index_file(self, msg):
         """Index all documents in a file."""
         file_path = msg['path']
+        print(f'Indexing from file {file_path}')
         try:
             _write_to_elastic_from_file(file_path)
         except Exception as err:
             os.remove(file_path)
             raise err
 
-    def _perform_batch_ops(self, min_length=1):
-        """Perform all the batch writes and deletes and empty the lists."""
-        # Only perform batch ops at most once every `self.batch_interval` seconds
-        write_len = len(self.batch_writes)
-        delete_len = len(self.batch_deletes)
-        print('(write_len, delete_len)', (write_len, delete_len))
-        if write_len >= min_length:
-            _write_to_elastic(self.batch_writes)
-            self.batch_writes = []
-            print(f"es_writer wrote {write_len} documents to elasticsearch.")
-        if delete_len >= min_length:
-            _delete_from_elastic(self.batch_deletes)
-            self.batch_deletes = []
-            print(f"es_writer deleted {delete_len} documents from elasticsearch.")
+    # def _perform_batch_ops(self, min_length=1):
+    #     """Perform all the batch writes and deletes and empty the lists."""
+    #     # Only perform batch ops at most once every `self.batch_interval` seconds
+    #     write_len = len(self.batch_writes)
+    #     delete_len = len(self.batch_deletes)
+    #     print('(write_len, delete_len)', (write_len, delete_len))
+    #     if write_len >= min_length:
+    #         _write_to_elastic(self.batch_writes)
+    #         self.batch_writes = []
+    #         print(f"es_writer wrote {write_len} documents to elasticsearch.")
+    #     if delete_len >= min_length:
+    #         _delete_from_elastic(self.batch_deletes)
+    #         self.batch_deletes = []
+    #         print(f"es_writer deleted {delete_len} documents from elasticsearch.")
 
     def _init_index(self, msg):
         """
@@ -262,6 +255,7 @@ def _write_to_elastic_from_file(file_path):
             data=fd,
             headers={"Content-Type": "application/json"}
         )
+        print('ES Writer response', resp.text)
     if not resp.ok:
         # Unsuccesful save to elasticsearch.
         raise RuntimeError(f"Error saving to elasticsearch:\n{resp.text}")
