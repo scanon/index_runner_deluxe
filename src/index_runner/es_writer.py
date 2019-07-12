@@ -3,6 +3,7 @@ Elasticsearch data writer.
 
 Receives messages from index_runner.
 """
+import os
 import zmq
 import zmq.error
 import json
@@ -76,6 +77,8 @@ class ESWriter:
         action = msg['_action']
         if action == 'delete':
             self.batch_deletes.append(msg)
+        elif action == 'index_file':
+            self._index_file(msg)
         elif action == 'index':
             self.batch_writes.append(msg)
         elif action == 'init_index':
@@ -86,11 +89,21 @@ class ESWriter:
             self._set_global_perm(msg)
         self._perform_batch_ops(min_length=10000)
 
+    def _index_file(self, msg):
+        """Index all documents in a file."""
+        file_path = msg['path']
+        try:
+            _write_to_elastic_from_file(file_path)
+        except Exception as err:
+            os.remove(file_path)
+            raise err
+
     def _perform_batch_ops(self, min_length=1):
         """Perform all the batch writes and deletes and empty the lists."""
         # Only perform batch ops at most once every `self.batch_interval` seconds
         write_len = len(self.batch_writes)
         delete_len = len(self.batch_deletes)
+        print('(write_len, delete_len)', (write_len, delete_len))
         if write_len >= min_length:
             _write_to_elastic(self.batch_writes)
             self.batch_writes = []
@@ -228,6 +241,27 @@ def _delete_from_elastic(batch_deletes):
         data=json_body,
         headers={"Content-Type": "application/json"}
     )
+    if not resp.ok:
+        # Unsuccesful save to elasticsearch.
+        raise RuntimeError(f"Error saving to elasticsearch:\n{resp.text}")
+
+
+def _write_to_elastic_from_file(file_path):
+    """
+    Bulk save a list of documents to an index from a source file.
+    Each entry in the list has {doc, id, index}
+        doc - document data (for indexing events)
+        id - document id
+        index - index name
+        delete - bool (for delete events)
+    """
+    # Save the documents using the elasticsearch http api
+    with open(file_path, 'rb') as fd:
+        resp = requests.post(
+            f"{_ES_URL}/_bulk",
+            data=fd,
+            headers={"Content-Type": "application/json"}
+        )
     if not resp.ok:
         # Unsuccesful save to elasticsearch.
         raise RuntimeError(f"Error saving to elasticsearch:\n{resp.text}")

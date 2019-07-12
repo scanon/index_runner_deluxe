@@ -4,11 +4,11 @@ Consume workspace update events from kafka and generate new index updates for es
 This sends json messages to es_writer over a thread socket with a special key:
     _action - string - action name (eg. 'index', 'delete', etc)
 """
-import sys
 import zmq
 import json
 import hashlib
 import traceback
+import tempfile
 from dataclasses import dataclass
 
 from utils.kafka_consumer import kafka_consumer
@@ -88,19 +88,33 @@ class IndexRunner:
     def _run_indexer(self, msg):
         """
         Run the indexer for a workspace event message and produce an event for it.
-        This will be threaded and backgrounded.
         """
         # index_obj returns a generator
         print('Iterating over indexing results...')
-        for result in index_obj(msg):
-            sys.stdout.write('.')
-            if not result:
-                print('Empty result..')
-                self._log_err_to_es(msg)
-                continue
-            # Push to the elasticsearch write queue
-            self.sock.send_json(result)
+        with tempfile.NamedTemporaryFile(delete=False, mode='a') as tmp:
+            out_path = tmp.name
+            for result in index_obj(msg):
+                if not result:
+                    self._log_err_to_es(msg)
+                    continue
+                # Create a file for an elasticsearch bulk write
+                result_str = json.dumps({
+                    'index': {
+                        '_index': result['index'],
+                        '_type': _CONFIG['global']['es_type_global_name'],
+                        '_id': result['id']
+                    }
+                })
+                result_str += '\n'
+                result_str += json.dumps(result['doc'])
+                result_str += '\n'
+                tmp.write(result_str)
         print('\n..Done iterating.')
+        self.sock.send_json({
+            '_action': 'index_file',
+            'path': out_path
+        })
+        print('\n..Done sending.')
 
     def _run_obj_deleter(self, msg):
         """
