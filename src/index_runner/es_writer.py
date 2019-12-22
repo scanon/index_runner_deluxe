@@ -187,7 +187,7 @@ def _create_index(index_name):
     resp = requests.put(url, data=json.dumps(request_body), headers=_HEADERS)
     if not resp.ok:
         err_type = resp.json()['error']['type']
-        if err_type == 'index_already_exists_exception':
+        if err_type.endswith('_already_exists_exception') :
             return Status.EXISTS
         else:
             raise RuntimeError(f"Error while creating new index {index_name}:\n{resp.text}")
