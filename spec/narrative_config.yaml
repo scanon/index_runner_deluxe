@@ -9,7 +9,8 @@ latest_versions:
 aliases:
   narrative:
     - narrative_2
-    - narrative_1
+
+ws_type_blacklist: []
 
 # Generic, global type mappings. These can be reused in any index mappings below.
 global_mappings:
